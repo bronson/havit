@@ -78,27 +78,18 @@ fn main() -> std::io::Result<()> {
 
     // ensure database is fully migrated (usually this is a no-op)
     let report = migrations::runner().run(&mut conn).unwrap();
-    // TODO: how can I panic if the database is too new? Answer: I think Refinery already does this!
-    println!("{:#?}", report);
+    // TODO: print a nice error if the db has more migrations than the app (right now we just panic)
+    if report.applied_migrations().len() > 0 {
+        println!("{:#?}", report);
+    }
 
     for entry in WalkDir::new("src").follow_links(true) {
         let entry = entry.unwrap();
         let metadata = entry.metadata().unwrap();
 
-        if metadata.is_dir() { continue }
-
-        // let etype = match entry.metadata().unwrap().file_type() {
-        //     is_dir() => "d",
-        //     is_file() => "f",
-        //     _ => "x"
-        // }
-
-        // nasty nasty nasty. Is it possible to use match on std:fs::FileType?
-        // let etype = if entry.metadata().unwrap().file_type().is_dir() { "d" } else
-        //     if entry.metadata().unwrap().file_type().is_file() { "f" } else { "x" };
-        // println!("{} {}", etype, entry.path().display());
-
-        insert_file(&conn, entry);
+        if metadata.is_file() {
+            insert_file(&conn, entry);
+        }
     }
 
     Ok(())
