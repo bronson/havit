@@ -1,5 +1,6 @@
 use chrono::DateTime;
 use rusqlite::params;
+use walkdir::WalkDir;
 
 // extern crate libsqlite3_sys;
 
@@ -8,39 +9,32 @@ mod migrations;
 // THOUGHT: refinery+barrel get me 80% of what I would use Diesel for, and are way less overbearing.
 //   To get 99%, is there any way for Barrel to somehow connect the table type to a struct? Close the loop?
 
-struct File {
+struct File<'a> {
     _id: i32,
-    name: String,
-    path: String,
+    name: &'a str,
+    path: &'a str,
     size: i64, // sqlite forces signed
-    ctime: DateTime::<chrono::Local>,  // ?? is putting "<chrono::Local>" everywhere really the best technique?
+    // ?? is putting "<chrono::Local>" everywhere really the best technique?
+    ctime: DateTime::<chrono::Local>,
     mtime: DateTime::<chrono::Local>,
     atime: DateTime::<chrono::Local>,
     hash: String
 }
 
-fn main() -> std::io::Result<()> {
-    let mut conn = rusqlite::Connection::open("havit.sqlite").unwrap();
+fn insert_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) {
+    let metadata = entry.metadata().unwrap();
 
-    // ensure database is fully migrated (usually a no-op)
-    // TODO: how can I die if the database is too new? Answer: I think Refinery already does this!
-    let report = migrations::runner().run(&mut conn).unwrap();
-    println!("{:#?}", report);
-
-    let name = ".gitignore";
-    let metadata = std::fs::metadata(name).unwrap();
-
-    // rusqlite can't persist a SystemTime so use Chrono
+    // rusqlite can't persist a SystemTime so convert times to Chrono
     // TODO: should store null if any of these values aren't supplied. Get rid of unwrap().
-    // TODO: how big a patch would it be to have rusqlite support SystemTime?
+    // TODO: how big a patch would it be to just have rusqlite support SystemTime?
     fn convert(t: std::time::SystemTime) -> chrono::DateTime::<chrono::Local> {
         chrono::DateTime::<chrono::Local>::from(t)
     }
 
     let file = File {
         _id: 0,
-        name: name.to_string(),
-        path: ".".to_string(),
+        name: entry.file_name().to_str().unwrap(),
+        path: entry.path().parent().unwrap().to_str().unwrap(),
         size: metadata.len() as i64, // unsigned to signed truncation
         mtime: convert(metadata.modified().unwrap()),
         atime: convert(metadata.accessed().unwrap()),
@@ -48,11 +42,15 @@ fn main() -> std::io::Result<()> {
         hash: "-".to_string()
     };
 
+
+    // Apparently in sqlite, inserting in a transaction runs almost as fast as a bulk insert.
+    // That's easier than cobbling together some bulk insert code.
+
     let result = conn.execute(
         "INSERT INTO files (name, path, size, ctime, mtime, atime, hash) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![file.name, file.path, file.size, file.ctime, file.mtime, file.atime, file.hash]);
 
-    // Trying to match the actual error, but can't get Rust to evalute libsqlite3_sys.
+    // Trying to match the actual error, but I just can't get Rust to accept `libsqlite3_sys`.
 
     // let rows = match result {
     //     Ok(rows) => rows,
@@ -72,6 +70,35 @@ fn main() -> std::io::Result<()> {
         Ok(1) => (),
         Ok(rows) => panic!("More than one row {} for {}/{} !?  Result: {:#?}", rows, file.path, file.name, result),
         Err(_) => panic!("Error inserting {}/{}: {:#?}", file.path, file.name, result)
+    }
+}
+
+fn main() -> std::io::Result<()> {
+    let mut conn = rusqlite::Connection::open("havit.sqlite").unwrap();
+
+    // ensure database is fully migrated (usually this is a no-op)
+    let report = migrations::runner().run(&mut conn).unwrap();
+    // TODO: how can I panic if the database is too new? Answer: I think Refinery already does this!
+    println!("{:#?}", report);
+
+    for entry in WalkDir::new("src").follow_links(true) {
+        let entry = entry.unwrap();
+        let metadata = entry.metadata().unwrap();
+
+        if metadata.is_dir() { continue }
+
+        // let etype = match entry.metadata().unwrap().file_type() {
+        //     is_dir() => "d",
+        //     is_file() => "f",
+        //     _ => "x"
+        // }
+
+        // nasty nasty nasty. Is it possible to use match on std:fs::FileType?
+        // let etype = if entry.metadata().unwrap().file_type().is_dir() { "d" } else
+        //     if entry.metadata().unwrap().file_type().is_file() { "f" } else { "x" };
+        // println!("{} {}", etype, entry.path().display());
+
+        insert_file(&conn, entry);
     }
 
     Ok(())

@@ -153,6 +153,7 @@ dependencies = [
  "clap",
  "refinery",
  "rusqlite",
+ "walkdir",
 ]
 
 [[package]]
