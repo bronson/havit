@@ -9,6 +9,6 @@ edition = "2018"
 [dependencies]
 clap = "2.33.3"
 chrono = "0.4"
-rusqlite = { version = "0.23.1", features = ["bundled", "chrono"] } # behind 0.25.0 because refinery requires an older libsqlite3-sys
+rusqlite = { version = "0.24.2", features = ["bundled", "chrono"] } # v0.25.0 conflicts with Refinery
 refinery = { version = "0.5.0", features = ["rusqlite"] }
 barrel = { version = "0.6.5", features = ["sqlite3"] }
