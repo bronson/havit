@@ -1,5 +1,5 @@
 use chrono::DateTime;
-use clap::{Arg, App, SubCommand};
+use clap::{App, Arg, SubCommand};
 use rusqlite::params;
 use walkdir::WalkDir;
 
@@ -20,10 +20,10 @@ struct File<'a> {
     path: &'a str,
     size: i64, // sqlite forces signed
     // ?? is putting "<chrono::Local>" everywhere really the best technique?
-    ctime: DateTime::<chrono::Local>,
-    mtime: DateTime::<chrono::Local>,
-    atime: DateTime::<chrono::Local>,
-    hash: String
+    ctime: DateTime<chrono::Local>,
+    mtime: DateTime<chrono::Local>,
+    atime: DateTime<chrono::Local>,
+    hash: String,
 }
 
 fn insert_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) {
@@ -32,7 +32,7 @@ fn insert_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) {
     // rusqlite can't persist a SystemTime so convert times to Chrono
     // TODO: should store null if any of these values aren't supplied. Get rid of unwrap().
     // TODO: how big a patch would it be to just have rusqlite support SystemTime?
-    fn convert(t: std::time::SystemTime) -> chrono::DateTime::<chrono::Local> {
+    fn convert(t: std::time::SystemTime) -> chrono::DateTime<chrono::Local> {
         chrono::DateTime::<chrono::Local>::from(t)
     }
 
@@ -44,7 +44,7 @@ fn insert_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) {
         mtime: convert(metadata.modified().unwrap()),
         atime: convert(metadata.accessed().unwrap()),
         ctime: convert(metadata.created().unwrap()),
-        hash: "-".to_string()
+        hash: "-".to_string(),
     };
 
     // Apparently in sqlite, inserting in a transaction runs almost as fast as a bulk insert.
@@ -72,8 +72,11 @@ fn insert_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) {
 
     match result {
         Ok(1) => (),
-        Ok(rows) => panic!("More than one row {} for {}/{} !?  Result: {:#?}", rows, file.path, file.name, result),
-        Err(_) => panic!("Error inserting {}/{}: {:#?}", file.path, file.name, result)
+        Ok(rows) => panic!(
+            "More than one row {} for {}/{} !?  Result: {:#?}",
+            rows, file.path, file.name, result
+        ),
+        Err(_) => panic!("Error inserting {}/{}: {:#?}", file.path, file.name, result),
     }
 }
 
@@ -87,12 +90,19 @@ fn add_entries(conn: &rusqlite::Connection, file: &str) {
 }
 
 fn main() -> std::io::Result<()> {
-    let matches = App::new("havit").version("0.1").about("Stores a file hierarchy in sqlite.").author("bronson")
+    let matches = App::new("havit")
+        .version("0.1")
+        .about("Stores a file hierarchy in sqlite.")
+        .author("bronson")
         .subcommand(
             // init, check
             SubCommand::with_name("add")
                 .about("Adds files and directories to the database")
-                .arg(Arg::with_name("entries").help("the dirs/files to add").multiple(true)),
+                .arg(
+                    Arg::with_name("entries")
+                        .help("the dirs/files to add")
+                        .multiple(true),
+                ),
         )
         .get_matches();
 
@@ -107,8 +117,12 @@ fn main() -> std::io::Result<()> {
     let tx = conn.transaction().unwrap();
     if let Some(matches) = matches.subcommand_matches("add") {
         match matches.values_of("entries") {
-            Some(v) => for el in v { add_entries(&tx, el); },
-            _ => add_entries(&tx, ".")
+            Some(v) => {
+                for el in v {
+                    add_entries(&tx, el);
+                }
+            }
+            _ => add_entries(&tx, "."),
         }
     }
     tx.commit().unwrap();

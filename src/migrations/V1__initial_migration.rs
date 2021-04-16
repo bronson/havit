@@ -5,9 +5,9 @@ pub fn migration() -> String {
 
     m.create_table("files", |t| {
         t.add_column("id", types::primary());
-        t.add_column("name", types::varchar(255));  // should this be text() too?
+        t.add_column("name", types::varchar(255)); // should this be text() too?
         t.add_column("path", types::text());
-        t.add_column("size", types::integer());      // sqlite will expand storage up to 8 bytes
+        t.add_column("size", types::integer()); // sqlite will expand storage up to 8 bytes
         t.add_column("ctime", types::date());
         t.add_column("mtime", types::date());
         t.add_column("atime", types::date());

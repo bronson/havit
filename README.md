@@ -11,6 +11,8 @@ Mostly this is a project to learn Rust.
 * `cargo build --release`
 * Copy `target/release/havit` somewhere on your path.
 
+TODO: maybe `cargo make`?
+
 ## Use
 
 * `havit add src`
