@@ -3,6 +3,10 @@ use clap::{Arg, App, SubCommand};
 use rusqlite::params;
 use walkdir::WalkDir;
 
+// TODO: index doesn't work if we feed it different relative paths
+//    abc/def   vs   ./abc/def   vs   ../abc/def
+// Need to normalize the path before storing!
+
 // extern crate libsqlite3_sys;
 
 mod migrations;
@@ -46,7 +50,6 @@ fn insert_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) {
     // Apparently in sqlite, inserting in a transaction runs almost as fast as a bulk insert.
     // That's easier than cobbling together some bulk insert code.
 
-    println!("added {}/{}", file.path, file.name);
     let result = conn.execute(
         "INSERT INTO files (name, path, size, ctime, mtime, atime, hash) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![file.name, file.path, file.size, file.ctime, file.mtime, file.atime, file.hash]);
@@ -101,12 +104,14 @@ fn main() -> std::io::Result<()> {
         println!("{:#?}", report);
     }
 
+    let tx = conn.transaction().unwrap();
     if let Some(matches) = matches.subcommand_matches("add") {
         match matches.values_of("entries") {
-            Some(v) => for el in v { add_entries(&conn, el); },
-            _ => add_entries(&conn, ".")
+            Some(v) => for el in v { add_entries(&tx, el); },
+            _ => add_entries(&tx, ".")
         }
     }
+    tx.commit().unwrap();
 
     Ok(())
 }
