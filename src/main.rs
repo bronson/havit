@@ -1,4 +1,5 @@
 use chrono::DateTime;
+use clap::{Arg, App, SubCommand};
 use rusqlite::params;
 use walkdir::WalkDir;
 
@@ -42,10 +43,10 @@ fn insert_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) {
         hash: "-".to_string()
     };
 
-
     // Apparently in sqlite, inserting in a transaction runs almost as fast as a bulk insert.
     // That's easier than cobbling together some bulk insert code.
 
+    println!("added {}/{}", file.path, file.name);
     let result = conn.execute(
         "INSERT INTO files (name, path, size, ctime, mtime, atime, hash) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![file.name, file.path, file.size, file.ctime, file.mtime, file.atime, file.hash]);
@@ -73,22 +74,37 @@ fn insert_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) {
     }
 }
 
+fn add_entries(conn: &rusqlite::Connection, file: &str) {
+    for entry in WalkDir::new(file).follow_links(true) {
+        let entry = entry.unwrap();
+        if entry.metadata().unwrap().is_file() {
+            insert_file(&conn, entry);
+        }
+    }
+}
+
 fn main() -> std::io::Result<()> {
+    let matches = App::new("havit").version("0.1").about("Stores a file hierarchy in sqlite.").author("bronson")
+        .subcommand(
+            // init, check
+            SubCommand::with_name("add")
+                .about("Adds files and directories to the database")
+                .arg(Arg::with_name("entries").help("the dirs/files to add").multiple(true)),
+        )
+        .get_matches();
+
     let mut conn = rusqlite::Connection::open("havit.sqlite").unwrap();
 
-    // ensure database is fully migrated (usually this is a no-op)
     let report = migrations::runner().run(&mut conn).unwrap();
-    // TODO: print a nice error if the db has more migrations than the app (right now we just panic)
+    // TODO: print a nice error if the db is newer (has more migrations) than the app.
     if report.applied_migrations().len() > 0 {
         println!("{:#?}", report);
     }
 
-    for entry in WalkDir::new("src").follow_links(true) {
-        let entry = entry.unwrap();
-        let metadata = entry.metadata().unwrap();
-
-        if metadata.is_file() {
-            insert_file(&conn, entry);
+    if let Some(matches) = matches.subcommand_matches("add") {
+        match matches.values_of("entries") {
+            Some(v) => for el in v { add_entries(&conn, el); },
+            _ => add_entries(&conn, ".")
         }
     }
 
