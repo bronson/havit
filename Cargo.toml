@@ -13,3 +13,4 @@ rusqlite = { version = "0.24.2", features = ["bundled", "chrono"] } # v0.25.0 co
 refinery = { version = "0.5.0", features = ["rusqlite"] }
 barrel = { version = "0.6.5", features = ["sqlite3"] }
 walkdir = "2"
+blake3 = "0.3.7"

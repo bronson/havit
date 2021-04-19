@@ -3,6 +3,8 @@ use clap::{App, Arg, SubCommand};
 use rusqlite::params;
 use walkdir::WalkDir;
 
+use std::io::Read;
+
 // TODO: index doesn't work if we feed it different relative paths
 //    abc/def   vs   ./abc/def   vs   ../abc/def
 // Need to normalize the path before storing!
@@ -23,7 +25,27 @@ struct File<'a> {
     ctime: DateTime<chrono::Local>,
     mtime: DateTime<chrono::Local>,
     atime: DateTime<chrono::Local>,
-    hash: String,
+    hash: blake3::Hash,
+}
+
+fn hash_file<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<blake3::Hash> {
+    let mut hasher = blake3::Hasher::new();
+    let mut file = std::fs::File::open(path)?;
+    // Newbie q: it seems strange that we initialize it and immediately overwrite it.
+    // Maybe Rust should have a first-class buffer type that knows how many bytes are in it?
+    // That would remove the chance of accessing uninitialized memory without needing to set every byte to 0.
+    let mut buffer = [0; 65536];
+
+    loop {
+        match file.read(&mut buffer) {
+            Ok(0) => return Ok(hasher.finalize()),
+            Ok(n) => {
+                hasher.update(&buffer[..n]);
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        }
+    }
 }
 
 fn insert_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) {
@@ -44,7 +66,7 @@ fn insert_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) {
         mtime: convert(metadata.modified().unwrap()),
         atime: convert(metadata.accessed().unwrap()),
         ctime: convert(metadata.created().unwrap()),
-        hash: "-".to_string(),
+        hash: hash_file(entry.path()).unwrap(),
     };
 
     // Apparently in sqlite, inserting in a transaction runs almost as fast as a bulk insert.
@@ -52,9 +74,10 @@ fn insert_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) {
 
     let result = conn.execute(
         "INSERT INTO files (name, path, size, ctime, mtime, atime, hash) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![file.name, file.path, file.size, file.ctime, file.mtime, file.atime, file.hash]);
+        params![file.name, file.path, file.size, file.ctime, file.mtime, file.atime, file.hash.to_hex().as_str()]);
 
     // Trying to match the actual error, but I just can't get Rust to accept `libsqlite3_sys`.
+    //     https://play.rust-lang.org/?version=stable&mode=debug&edition=2018&gist=2fe63f8b28cafa8afe4fefd85c9502c8
 
     // let rows = match result {
     //     Ok(rows) => rows,

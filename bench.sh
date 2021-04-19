@@ -20,3 +20,6 @@ ls -l havit.sqlite
 # Results:
 # - Using a transaction cuts the time required by an order of magnitude.
 # - Using an index increases the database size by 2X but doesn't add significantly to the time needed.
+
+# Update: adding hashing made the run take 2X longer and the db 25% larger.
+# Guessing computing the hash in parallel will pick up much of the dropped speed.

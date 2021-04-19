@@ -15,5 +15,5 @@ TODO: maybe `cargo make`?
 
 ## Use
 
-* `havit add src`
-* `havit check src` (TODO)
+* `havit add <file-or-dir>...`
+* `havit check <file-or-dir>...`
