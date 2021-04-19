@@ -1,3 +1,7 @@
+// Disable the unique index, maybe forever.
+// It doubles the size of the database and prevents some potentially useful use of duplicates.
+// Maybe we should warn on duplicates, or have a check-for-dupes-in-db command?
+
 // use barrel::{types, Migration};
 
 pub fn migration() -> String {
