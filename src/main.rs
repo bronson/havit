@@ -112,13 +112,20 @@ fn add_entries(conn: &rusqlite::Connection, file: &str) {
     }
 }
 
-fn main() -> std::io::Result<()> {
+fn run() -> Result<(), Box<dyn std::error::Error>> {
     let matches = App::new("havit")
         .version("0.1")
         .about("Stores a file hierarchy in sqlite.")
         .author("bronson")
+        .arg(
+            Arg::with_name("database")
+                .short("d")
+                .long("db")
+                .value_name("FILE")
+                .help("Specifies the database file to use")
+                .takes_value(true),
+        )
         .subcommand(
-            // init, check
             SubCommand::with_name("add")
                 .about("Adds files and directories to the database")
                 .arg(
@@ -129,7 +136,8 @@ fn main() -> std::io::Result<()> {
         )
         .get_matches();
 
-    let mut conn = rusqlite::Connection::open("havit.sqlite").unwrap();
+    let dbfile = matches.value_of("database").unwrap_or("havit.sqlite");
+    let mut conn = rusqlite::Connection::open(dbfile)?;
 
     let report = migrations::runner().run(&mut conn).unwrap();
     // TODO: print a nice error if the db is newer (has more migrations) than the app.
@@ -137,6 +145,7 @@ fn main() -> std::io::Result<()> {
         println!("{:#?}", report);
     }
 
+    // inserting in a transaction is 10X faster than one-at-a-time
     let tx = conn.transaction().unwrap();
     if let Some(matches) = matches.subcommand_matches("add") {
         match matches.values_of("entries") {
@@ -151,4 +160,11 @@ fn main() -> std::io::Result<()> {
     tx.commit().unwrap();
 
     Ok(())
+}
+
+fn main() {
+    if let Err(err) = run() {
+        eprintln!("{}", err);
+        std::process::exit(2);
+    }
 }
