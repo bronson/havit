@@ -5,7 +5,8 @@ use walkdir::WalkDir;
 
 use std::io::Read;
 
-// TODO: index doesn't work if we feed it different relative paths
+
+// TODO: the unique index doesn't work if we feed it different relative paths
 //    abc/def   vs   ./abc/def   vs   ../abc/def
 // Need to normalize the path before storing!
 
@@ -28,10 +29,17 @@ struct File<'a> {
     hash: blake3::Hash,
 }
 
+static mut VERBOSITY: u64 = 0;
+
+fn verbosity() -> u64 {
+    unsafe { VERBOSITY }
+}
+
 fn hash_file<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<blake3::Hash> {
     let mut hasher = blake3::Hasher::new();
     let mut file = std::fs::File::open(path)?;
-    // Newbie q: it seems strange that we initialize it and immediately overwrite it.
+
+    // Newbie q: it seems strange that we initialize the buffer to 0 and immediately overwrite the zeroes with data.
     // Maybe Rust should have a first-class buffer type that knows how many bytes are in it?
     // That would remove the chance of accessing uninitialized memory without needing to set every byte to 0.
     let mut buffer = [0; 65536];
@@ -68,9 +76,6 @@ fn insert_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) {
         ctime: convert(metadata.created().unwrap()),
         hash: hash_file(entry.path()).unwrap(),
     };
-
-    // Apparently in sqlite, inserting in a transaction runs almost as fast as a bulk insert.
-    // That's easier than cobbling together some bulk insert code.
 
     let result = conn.execute(
         "INSERT INTO files (name, path, size, ctime, mtime, atime, hash) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -122,8 +127,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .short("d")
                 .long("db")
                 .value_name("FILE")
-                .help("Specifies the database file to use")
+                .help("Specify the database file to use")
                 .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("verbose")
+                .short("v")
+                .long("verbose")
+                .multiple(true)
+                .help("Increase verbosity"),
         )
         .subcommand(
             SubCommand::with_name("add")
@@ -136,13 +148,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         )
         .get_matches();
 
+
+    // TODO: what's a better way to handle verbosity?
+    // Passing it as an arg to every function that may need it isn't reasonable
+    unsafe { VERBOSITY = matches.occurrences_of("verbose") };
+    // if verbosity() > 3 {
+    //     println!("MATCHES: {:#?}", matches);
+    // }
+
     let dbfile = matches.value_of("database").unwrap_or("havit.sqlite");
     let mut conn = rusqlite::Connection::open(dbfile)?;
 
     let report = migrations::runner().run(&mut conn).unwrap();
+    let num_migrations = report.applied_migrations().len();
     // TODO: print a nice error if the db is newer (has more migrations) than the app.
-    if report.applied_migrations().len() > 0 {
-        println!("{:#?}", report);
+    if num_migrations > 0 {
+        if verbosity() > 1 {
+            println!("MIGRATION STATUS: {:#?}", report);
+        } else {
+            println!("Applied {} migration{}", num_migrations, if num_migrations != 1 {"s"} else {""} );
+        }
     }
 
     // inserting in a transaction is 10X faster than one-at-a-time
@@ -164,7 +189,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 fn main() {
     if let Err(err) = run() {
-        eprintln!("{}", err);
-        std::process::exit(2);
+        if verbosity() > 0 {
+            eprintln!("ERROR: {:#?}", err);
+        } else {
+            eprintln!("{}", err);
+        }
+
+        // TODO: should return sensible error codes too
+        std::process::exit(1);
     }
 }
