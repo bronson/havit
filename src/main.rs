@@ -6,7 +6,11 @@ use walkdir::WalkDir;
 use std::io::Read;
 use std::time::Instant;
 
+use humansize::{FileSize, file_size_opts};
+
+
 // TODO: replace println with writeln? https://github.com/BurntSushi/advent-of-code/issues/17
+// TODO: proper error message for missing file
 
 // TODO: the unique index doesn't work if we feed it different relative paths
 //    abc/def   vs   ./abc/def   vs   ../abc/def
@@ -37,9 +41,10 @@ fn verbosity() -> u64 {
     unsafe { VERBOSITY }
 }
 
-fn hash_file<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<blake3::Hash> {
+fn hash_file<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<(blake3::Hash, usize)> {
     let mut hasher = blake3::Hasher::new();
     let mut file = std::fs::File::open(path)?;
+    let mut total = 0;
 
     // Newbie q: it seems strange that we initialize the buffer to 0 and immediately overwrite the zeroes with data.
     // Maybe Rust should have a first-class buffer type that knows how many bytes are in it?
@@ -48,8 +53,9 @@ fn hash_file<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<blake3::Hash
 
     loop {
         match file.read(&mut buffer) {
-            Ok(0) => return Ok(hasher.finalize()),
+            Ok(0) => return Ok((hasher.finalize(), total)),
             Ok(n) => {
+                total += n;
                 hasher.update(&buffer[..n]);
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -58,7 +64,7 @@ fn hash_file<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<blake3::Hash
     }
 }
 
-fn insert_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) {
+fn insert_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) -> usize {
     let metadata = entry.metadata().unwrap();
 
     // rusqlite can't persist a SystemTime so convert times to Chrono
@@ -68,6 +74,8 @@ fn insert_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) {
         chrono::DateTime::<chrono::Local>::from(t)
     }
 
+    let (hash, size) = hash_file(entry.path()).unwrap();
+
     let file = File {
         _id: 0,
         name: entry.file_name().to_str().unwrap(),
@@ -76,7 +84,7 @@ fn insert_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) {
         mtime: convert(metadata.modified().unwrap()),
         atime: convert(metadata.accessed().unwrap()),
         ctime: convert(metadata.created().unwrap()),
-        hash: hash_file(entry.path()).unwrap(),
+        hash: hash,
     };
 
     let result = conn.execute(
@@ -108,15 +116,19 @@ fn insert_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) {
         ),
         Err(_) => panic!("Error inserting {}/{}: {:#?}", file.path, file.name, result),
     }
+
+    size
 }
 
-fn add_entries(conn: &rusqlite::Connection, file: &str) {
+fn add_entries(conn: &rusqlite::Connection, file: &str) -> usize {
+    let mut total = 0;
     for entry in WalkDir::new(file).follow_links(true) {
         let entry = entry.unwrap();
         if entry.metadata().unwrap().is_file() {
-            insert_file(&conn, entry);
+            total += insert_file(&conn, entry);
         }
     }
+    total
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -150,7 +162,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         )
         .get_matches();
 
-
     // TODO: what's a better way to handle verbosity?
     // Passing it as an arg to every function that may need it isn't reasonable
     unsafe { VERBOSITY = matches.occurrences_of("verbose") };
@@ -168,7 +179,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         if verbosity() > 1 {
             println!("MIGRATION STATUS: {:#?}", report);
         } else {
-            println!("Applied {} migration{}", num_migrations, if num_migrations != 1 {"s"} else {""} );
+            println!(
+                "Applied {} migration{}",
+                num_migrations,
+                if num_migrations != 1 { "s" } else { "" }
+            );
         }
     }
 
@@ -176,20 +191,28 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // inserting in a transaction is 10X faster than one-at-a-time
     let tx = conn.transaction().unwrap();
+    let mut total = 0;
     if let Some(matches) = matches.subcommand_matches("add") {
         match matches.values_of("entries") {
             Some(v) => {
                 for el in v {
-                    add_entries(&tx, el);
+                    total += add_entries(&tx, el);
                 }
             }
-            _ => add_entries(&tx, "."),
+            _ => total += add_entries(&tx, "."),
         }
     }
     tx.commit().unwrap();
 
     let since = Instant::now().duration_since(start);
-    eprintln!("process took {:?}", since);
+    eprintln!(
+        "it took {:?} to process {:?} bytes ({}/sec)",
+        since,
+        total,
+        ((total as f64 / since.as_secs_f64()) as usize)
+            .file_size(file_size_opts::BINARY)
+            .unwrap(),
+    );
 
     Ok(())
 }

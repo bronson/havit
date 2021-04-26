@@ -14,3 +14,4 @@ refinery = { version = "0.5.0", features = ["rusqlite"] }
 barrel = { version = "0.6.5", features = ["sqlite3"] }
 walkdir = "2"
 blake3 = "0.3.7"
+humansize = "1.1.0"
