@@ -4,7 +4,9 @@ use rusqlite::params;
 use walkdir::WalkDir;
 
 use std::io::Read;
+use std::time::Instant;
 
+// TODO: replace println with writeln? https://github.com/BurntSushi/advent-of-code/issues/17
 
 // TODO: the unique index doesn't work if we feed it different relative paths
 //    abc/def   vs   ./abc/def   vs   ../abc/def
@@ -170,6 +172,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    let start = Instant::now();
+
     // inserting in a transaction is 10X faster than one-at-a-time
     let tx = conn.transaction().unwrap();
     if let Some(matches) = matches.subcommand_matches("add") {
@@ -183,6 +187,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     tx.commit().unwrap();
+
+    let since = Instant::now().duration_since(start);
+    eprintln!("process took {:?}", since);
 
     Ok(())
 }
