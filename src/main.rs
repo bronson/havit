@@ -10,6 +10,7 @@ use std::time::Instant;
 // TODO: replace println with writeln? https://github.com/BurntSushi/advent-of-code/issues/17
 // TODO: proper error message for missing file
 // TODO: extract prepared statements: https://github.com/rusqlite/rusqlite/blob/b8b1138fcf1ed29d50f5a3f9d94a9719e35146c2/src/statement.rs#L1275
+// TODO: add Rayon (or Futures or Tokio or async_std) and Indicatif?
 
 // TODO: the unique index doesn't work if we feed it different relative paths
 //    abc/def   vs   ./abc/def   vs   ../abc/def
@@ -189,6 +190,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .short("d")
                 .long("db")
                 .value_name("FILE")
+                .default_value("havit.sqlite")
                 .help("Specify the database file to use")
                 .takes_value(true),
         )
@@ -226,7 +228,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     //     println!("MATCHES: {:#?}", matches);
     // }
 
-    let dbfile = matches.value_of("database").unwrap_or("havit.sqlite");
+    let dbfile = matches.value_of("database").unwrap();
     let mut conn = rusqlite::Connection::open(dbfile)?;
 
     // conn.trace(Some(|s| println!("TRACE: {}", s)));
