@@ -1,16 +1,15 @@
 use chrono::DateTime;
-use clap::{App, Arg, SubCommand};
+use clap::{App, Arg, ArgMatches, SubCommand};
+use humansize::{file_size_opts, FileSize};
 use rusqlite::params;
 use walkdir::WalkDir;
 
 use std::io::Read;
 use std::time::Instant;
 
-use humansize::{FileSize, file_size_opts};
-
-
 // TODO: replace println with writeln? https://github.com/BurntSushi/advent-of-code/issues/17
 // TODO: proper error message for missing file
+// TODO: extract prepared statements: https://github.com/rusqlite/rusqlite/blob/b8b1138fcf1ed29d50f5a3f9d94a9719e35146c2/src/statement.rs#L1275
 
 // TODO: the unique index doesn't work if we feed it different relative paths
 //    abc/def   vs   ./abc/def   vs   ../abc/def
@@ -22,6 +21,8 @@ mod migrations;
 
 // THOUGHT: refinery+barrel get me 80% of what I would use Diesel for, and are way less overbearing.
 //   To get 99%, is there any way for Barrel to somehow connect the table type to a struct? Close the loop?
+
+// Find duplicate hashes: `SELECT hash, count(*) c FROM files GROUP BY hash HAVING c > 1 ORDER BY c DESC;`
 
 struct File<'a> {
     _id: i32,
@@ -114,7 +115,7 @@ fn insert_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) -> usize {
             "More than one row {} for {}/{} !?  Result: {:#?}",
             rows, file.path, file.name, result
         ),
-        Err(_) => panic!("Error inserting {}/{}: {:#?}", file.path, file.name, result),
+        Err(_) => panic!("inserting {}/{}: {:#?}", file.path, file.name, result),
     }
 
     size
@@ -126,6 +127,53 @@ fn add_entries(conn: &rusqlite::Connection, file: &str) -> usize {
         let entry = entry.unwrap();
         if entry.metadata().unwrap().is_file() {
             total += insert_file(&conn, entry);
+        }
+    }
+    total
+}
+
+fn check_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) -> usize {
+    let path = entry.path().to_str().unwrap();
+    let (hash, size) = hash_file(path).unwrap();
+
+    let mut stmt = conn
+        .prepare("SELECT COUNT(*) FROM files WHERE hash = :hash")
+        .unwrap();
+    let rows = stmt.query_and_then_named(&[(":hash", &hash.to_hex().as_str())], |row| row.get(0));
+    let count: i64 = rows.unwrap().next().unwrap().unwrap();
+    println!("{:#?}: {}", count, path);
+    size
+}
+
+fn check_entries(conn: &rusqlite::Connection, file: &str) -> usize {
+    let mut total = 0;
+    let walker = WalkDir::new(file)
+        .follow_links(true)
+        .sort_by_file_name()
+        .contents_first(true);
+    for entry in walker {
+        let entry = entry.unwrap();
+        if entry.metadata().unwrap().is_file() {
+            total += check_file(&conn, entry);
+        } else {
+        }
+    }
+    total
+}
+
+fn process_entries<F>(command: &str, matches: &ArgMatches, callback: F) -> usize
+where
+    F: Fn(&str) -> usize,
+{
+    let mut total = 0;
+    if let Some(matches) = matches.subcommand_matches(command) {
+        match matches.values_of("entries") {
+            Some(v) => {
+                for el in v {
+                    total += callback(el);
+                }
+            }
+            _ => total += callback("."),
         }
     }
     total
@@ -160,6 +208,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .multiple(true),
                 ),
         )
+        .subcommand(
+            SubCommand::with_name("check")
+                .about("Checks which files are already in the database")
+                .arg(
+                    Arg::with_name("entries")
+                        .help("the dirs/files to check")
+                        .multiple(true),
+                ),
+        )
         .get_matches();
 
     // TODO: what's a better way to handle verbosity?
@@ -171,6 +228,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let dbfile = matches.value_of("database").unwrap_or("havit.sqlite");
     let mut conn = rusqlite::Connection::open(dbfile)?;
+
+    // conn.trace(Some(|s| println!("TRACE: {}", s)));
+    // conn.profile(Some(|s,d| println!("PROFILE {:?}: {}", d, s)));
 
     let report = migrations::runner().run(&mut conn).unwrap();
     let num_migrations = report.applied_migrations().len();
@@ -187,21 +247,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    let mut total = 0;
     let start = Instant::now();
 
     // inserting in a transaction is 10X faster than one-at-a-time
     let tx = conn.transaction().unwrap();
-    let mut total = 0;
-    if let Some(matches) = matches.subcommand_matches("add") {
-        match matches.values_of("entries") {
-            Some(v) => {
-                for el in v {
-                    total += add_entries(&tx, el);
-                }
-            }
-            _ => total += add_entries(&tx, "."),
-        }
-    }
+    total += process_entries("add", &matches, |el| add_entries(&tx, el));
+    total += process_entries("check", &matches, |el| check_entries(&tx, el));
     tx.commit().unwrap();
 
     let since = Instant::now().duration_since(start);
