@@ -21,7 +21,7 @@ mod proper_error_messages {
 
     #[test]
     fn test_missing_database() {
-        // `add nofile` is probably unnecessary but ensures we don't error on missing args first
+        // `add nofile` ensures we don't error on missing args first
         command().arg("--db=nodir/noexisty").arg("add").arg("nofile")
             .assert().failure().code(1)
             .stderr("unable to open database file: nodir/noexisty\n");

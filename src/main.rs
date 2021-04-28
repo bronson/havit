@@ -257,15 +257,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     total += process_entries("check", &matches, |el| check_entries(&tx, el))?;
     tx.commit().unwrap();
 
-    let since = Instant::now().duration_since(start);
-    eprintln!(
-        "it took {:?} to process {:?} bytes ({}/sec)",
-        since,
-        total,
-        ((total as f64 / since.as_secs_f64()) as usize)
-            .file_size(file_size_opts::BINARY)
-            .unwrap(),
-    );
+    let since = Instant::now().duration_since(start).as_secs_f64();
+    if since > 0.0 {
+        eprintln!(
+            "it took {:?} to process {:?} bytes ({}/sec)",
+            since,
+            total,
+            ((total as f64 / since) as usize)
+                .file_size(file_size_opts::BINARY)
+                .unwrap(),
+        );
+    }
 
     Ok(())
 }
