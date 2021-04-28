@@ -8,7 +8,6 @@ use std::io::Read;
 use std::time::Instant;
 
 // TODO: replace println with writeln? https://github.com/BurntSushi/advent-of-code/issues/17
-// TODO: proper error message for missing file
 // TODO: extract prepared statements: https://github.com/rusqlite/rusqlite/blob/b8b1138fcf1ed29d50f5a3f9d94a9719e35146c2/src/statement.rs#L1275
 // TODO: add Rayon (or Futures or Tokio or async_std) and Indicatif?
 
@@ -122,15 +121,15 @@ fn insert_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) -> usize {
     size
 }
 
-fn add_entries(conn: &rusqlite::Connection, file: &str) -> usize {
+fn add_entries(conn: &rusqlite::Connection, file: &str) -> Result<usize, std::io::Error> {
     let mut total = 0;
     for entry in WalkDir::new(file).follow_links(true) {
-        let entry = entry.unwrap();
+        let entry = entry?;
         if entry.metadata().unwrap().is_file() {
             total += insert_file(&conn, entry);
         }
     }
-    total
+    Ok(total)
 }
 
 fn check_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) -> usize {
@@ -146,38 +145,38 @@ fn check_file(conn: &rusqlite::Connection, entry: walkdir::DirEntry) -> usize {
     size
 }
 
-fn check_entries(conn: &rusqlite::Connection, file: &str) -> usize {
+fn check_entries(conn: &rusqlite::Connection, file: &str) -> Result<usize, std::io::Error> {
     let mut total = 0;
     let walker = WalkDir::new(file)
         .follow_links(true)
         .sort_by_file_name()
         .contents_first(true);
     for entry in walker {
-        let entry = entry.unwrap();
+        let entry = entry?;
         if entry.metadata().unwrap().is_file() {
             total += check_file(&conn, entry);
         } else {
         }
     }
-    total
+    Ok(total)
 }
 
-fn process_entries<F>(command: &str, matches: &ArgMatches, callback: F) -> usize
+fn process_entries<F>(command: &str, matches: &ArgMatches, callback: F) -> Result<usize, std::io::Error>
 where
-    F: Fn(&str) -> usize,
+    F: Fn(&str) -> Result<usize, std::io::Error>,
 {
     let mut total = 0;
     if let Some(matches) = matches.subcommand_matches(command) {
         match matches.values_of("entries") {
             Some(v) => {
                 for el in v {
-                    total += callback(el);
+                    total += callback(el)?;
                 }
             }
-            _ => total += callback("."),
+            _ => total += callback(".")?
         }
     }
-    total
+    Ok(total)
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -254,8 +253,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // inserting in a transaction is 10X faster than one-at-a-time
     let tx = conn.transaction().unwrap();
-    total += process_entries("add", &matches, |el| add_entries(&tx, el));
-    total += process_entries("check", &matches, |el| check_entries(&tx, el));
+    total += process_entries("add", &matches, |el| add_entries(&tx, el))?;
+    total += process_entries("check", &matches, |el| check_entries(&tx, el))?;
     tx.commit().unwrap();
 
     let since = Instant::now().duration_since(start);
